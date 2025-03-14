@@ -15,5 +15,7 @@
 	"sourceLanguageTag": "en",
 	"languageTags": [
 		"en"
-	]
+	],
+	"baseLocale": "",
+	"locales": []
 }
