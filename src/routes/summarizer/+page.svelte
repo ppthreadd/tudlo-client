@@ -1,7 +1,7 @@
 <script lang="ts">
     import "../../app.css";
 
-    import {Sun, Moon, ChevronUp, Upload, Loader2} from "@lucide/svelte";
+    import {ChevronUp, Upload, Loader2} from "@lucide/svelte";
     import { Button } from "$lib/components/ui/button/index.js";
     import { Input } from "$lib/components/ui/input/index.js";
     import { Label } from "$lib/components/ui/label/index.js";
