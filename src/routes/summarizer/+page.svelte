@@ -1,7 +1,7 @@
 <script lang="ts">
     import "../../app.css";
 
-    import {ChevronUp, Upload, Loader2} from "@lucide/svelte";
+    import {ChevronUp, Upload, Loader2, ChevronLeft, ChevronRight, Plus, Trash2} from "@lucide/svelte";
     import { Button } from "$lib/components/ui/button/index.js";
     import { Input } from "$lib/components/ui/input/index.js";
     import { Label } from "$lib/components/ui/label/index.js";
@@ -18,7 +18,7 @@
     /**
      * Text to be summarized by the backend.
      */
-    let text: string = "";
+    let texts: string[] = [""];
 
     /**
      * Additional Parameters from the user. The Large Language Model will take these into account when generating responses.
@@ -33,45 +33,83 @@
     /**
      * Number of paragraphs for summary.
      */
-    let paragraphs: number = 1;
+    let paragraphs: number = 0;
 
     /**
      * Number of sentences per paragraph.
      */
-    let sentences: number = 5;
+    let sentences: number = 0;
 
     /**
      * Response from LLM to be displayed
      */
-    let summaryResponse: string = "";
+    interface Summary {
+        topic: string;
+        summary: string;
+    }
+    let summaryResponses: Summary[] = [{
+        topic: "",
+        summary: ""
+    }];
 
     /**
      * flag for if LLM is processing text
      */
     let isLoading: boolean = false;
 
+    let currentPage: number = 1;
+    let totalPages: number = 1;
+    let lastSummarizedPage: number = 1;
+
     /**
      * Send details to backend
      */
-    function send() {
+    async function send() {
         const formData = new FormData();
-        formData.append("text", text);
-        formData.append("additionalParams", additionalParams);
+        let selectedTexts = texts.slice(lastSummarizedPage, totalPages + 1);
+        selectedTexts.forEach((text, index) => {
+            formData.append(`texts`, text);
+        });
+
+        //formData.append("additionalParams", additionalParams);
         formData.append("temperature", llmTemp.toString());
         formData.append("paragraphs", paragraphs.toString());
         formData.append("sentences", sentences.toString());
 
-        const formDataObject = Object.fromEntries(formData.entries());
-        console.log("FormData:", formDataObject);
-        summaryResponse = "";
-
+        lastSummarizedPage = totalPages;
         isLoading = true;
-        setTimeout(() => {
-            // TODO set fetching logic from backend
-            summaryResponse = "This is the generated summary!";
+
+        try {
+            const response = await fetch('http://127.0.0.1:8000/api/summarize', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const data = await response.json();
+
+            // Append each summary in order
+            data.results.forEach((result: any) => {
+                summaryResponses.push({
+                    topic: result.topic,
+                    summary: result.summary
+                });
+            });
+
+        } catch (error) {
+            console.error('Error:', error);
+            summaryResponses.push({
+                topic: "Error",
+                summary: error.message
+            })
+        } finally {
             isLoading = false;
-        }, 2000);
+        }
     }
+
 
     /**
      * Ensure that temperature is in range and round it off to the nearest hundredths.
@@ -117,62 +155,174 @@
     }
 
     /**
-     * Upload file and extract text
+     * Upload files and extract text from each
      * @param event
      */
     async function handleFileUpload(event: Event) {
         const input = event.target as HTMLInputElement;
         if (!input.files || input.files.length === 0) return;
 
-        const file = input.files[0];
-        const fileType = file.name.split(".").pop()?.toLowerCase();
+        // Process each file sequentially
+        for (let i = 0; i < input.files.length; i++) {
+            const file = input.files[i];
+            const fileType = file.name.split(".").pop()?.toLowerCase();
 
-        if (fileType === "txt") {
-            text = await readTextFile(file);
-        } else if (fileType === "pdf") {
-            text = await readPdfFile(file);
-        } else if (fileType === "docx") {
-            text = await readDocxFile(file);
-        } else {
-            console.error("Unsupported file type");
+            if (totalPages > 1 || texts[currentPage]) {
+                totalPages += 1;
+            }
+            currentPage = totalPages;
+
+            try {
+                if (fileType === "txt") {
+                    texts[currentPage] = await readTextFile(file);
+                } else if (fileType === "pdf") {
+                    texts[currentPage] = await readPdfFile(file);
+                } else if (fileType === "docx") {
+                    texts[currentPage] = await readDocxFile(file);
+                } else {
+                    console.error(`Unsupported file type for ${file.name}`);
+                    totalPages -= 1; // Revert the page count for unsupported files
+                    continue;
+                }
+                console.log(`Successfully processed: ${file.name}`);
+            } catch (error) {
+                console.error(`Error processing file ${file.name}:`, error);
+                totalPages -= 1; // Revert the page count for failed files
+            }
         }
 
         fileInput = null;
     }
+    // async function handleFileUpload(event: Event): Promise<void> {
+    //     const input = event.target as HTMLInputElement;
+    //     if (!input.files || input.files.length === 0) return;
+    //
+    //     const files = Array.from(input.files);
+    //     const initialPageCount = totalPages;
+    //
+    //     try {
+    //         await Promise.all(files.map(async (file, index) => {
+    //             const fileType = file.name.split(".").pop()?.toLowerCase();
+    //             const pageNumber = initialPageCount + index + 1;
+    //
+    //             if (fileType === "txt") {
+    //                 texts[pageNumber] = await readTextFile(file);
+    //             } else if (fileType === "pdf") {
+    //                 texts[pageNumber] = await readPdfFile(file);
+    //             } else if (fileType === "docx") {
+    //                 texts[pageNumber] = await readDocxFile(file);
+    //             } else {
+    //                 console.error(`Unsupported file type for ${file.name}`);
+    //                 return;
+    //             }
+    //             console.log(`Successfully processed: ${file.name}`);
+    //         }));
+    //
+    //         totalPages += files.length;
+    //         currentPage = totalPages;
+    //     } catch (error) {
+    //         console.error("Error processing files:", error);
+    //     }
+    //
+    //     fileInput = null;
+    // }
+
+    function addNewPage() {
+        texts.push(""); // Add new empty string
+        totalPages += 1;
+        currentPage = totalPages; // Set to new page index
+    }
+    function prevPage(): void {
+        currentPage -= 1;
+    }
+    function nextPage(): void {
+        currentPage += 1;
+    }
+    function deleteCurrentPage() {
+        totalPages -= 1;
+        if (texts.length === 0) return; // Prevent errors if array is empty
+
+        texts.splice(currentPage, 1);
+        summaryResponses.splice(currentPage, 1);
+
+        // Adjust currentPage to stay within bounds
+        if (currentPage > texts.length) {
+            currentPage = Math.max(1, texts.length); // Stay on the last available page
+        }
+        currentPage -= 1;
+        currentPage = Math.max(1, currentPage);
+    }
 </script>
 
 <div class="flex justify-center items-start gap-25 w-full">
-
-    <!--  User Input (File Upload/Text Edit  -->
     <div class="w-[90%] md:w-3/7">
-        <div class="grid w-1/2 max-w-sm items-center gap-1.5 mb-4">
-            <Label for="picture">Enter Text to be Summarized OR</Label>
-            <Button variant="default" type="button" class="flex items-center gap-2" onclick={triggerFileUpload}>
-                <Upload class="w-5 h-5" />
-                <span>Upload File</span>
-            </Button>
+        <div class="flex items-center gap-4 mb-4">  <!-- Flex container for all buttons -->
+            <!-- Upload File Button (Original) -->
+            <div class="w-full">  <!-- Full width container -->
+                <!-- Label stays on top -->
+                <Label for="picture">Enter Text to be Summarized OR</Label>
+
+                <!-- Full-width flex container for buttons -->
+                <div class="flex items-center w-full gap-2 mt-1.5">
+                    <!-- Upload File Button - now flex-1 to grow -->
+                    <Button variant="default" type="button" class="flex-1 flex items-center justify-center gap-2" onclick={triggerFileUpload}>
+                        <Upload class="w-5 h-5" />
+                        <span>Upload File</span>
+                    </Button>
+
+                    <!-- Arrow Buttons -->
+                    <Button variant="outline" size="icon" disabled={currentPage === 1} onclick={prevPage} class="flex-none">
+                        <ChevronLeft class="w-4 h-4" />
+                    </Button>
+                    <div class="text-sm font-medium px-2 py-1 bg-muted rounded-md">
+                        Page {currentPage}/{totalPages}
+                    </div>
+                    <Button variant="outline" size="icon" disabled={currentPage === totalPages} onclick={nextPage} class="flex-none">
+                        <ChevronRight class="w-4 h-4" />
+                    </Button>
+
+                    <!-- Create/Delete Buttons -->
+                    <Button variant="outline" class="flex-1 flex items-center justify-center" onclick={addNewPage}>
+                        <Plus class="w-4 h-4 mr-1" /> New Page
+                    </Button>
+                    <Button variant="outline" class="flex-1 flex items-center justify-center" disabled={totalPages === 1} onclick={deleteCurrentPage}>
+                        <Trash2 class="w-4 h-4 mr-1" /> Delete
+                    </Button>
+                </div>
+            </div>
         </div>
-        <Input id="text-file" type="file" accept=".docx,.pdf,.txt" class="hidden" bind:value={fileInput} onchange={handleFileUpload} />
+
+        <!-- Hidden File Input & Textarea (Unchanged) -->
+        <Input id="text-file" type="file" accept=".docx,.pdf,.txt" multiple class="hidden" bind:value={fileInput} onchange={handleFileUpload} />
         <Textarea
-                bind:value={text}
-                class="resize-none w-full h-[calc(100vh-18rem)] p-5"
-                placeholder="Type your message here."
-                id="message"
+            bind:value={texts[currentPage]}
+            class="resize-none w-full h-[calc(100vh-18rem)] p-5"
+            placeholder="Type your message here."
+            id="message"
         />
     </div>
 
     <div class="hidden md:block w-[90%] md:w-3/7">
         <div class="flex items-center gap-2 mb-2">
-            <div class="text-lg font-semibold">Summary</div>
+            <div class="text-lg font-semibold">
+                {#if summaryResponses && summaryResponses[currentPage]}
+                    Summary of {summaryResponses[currentPage].topic}
+                {:else}
+                    Summary
+                {/if}
+            </div>
         </div>
         <div class="hidden md:block response-box w-full h-[calc(100vh-15.5rem)] border border-border rounded-md overflow-auto p-5">
             {#if isLoading}
                 <span class="animate-pulse text-muted-foreground">Loading summary...</span>
+            {:else if summaryResponses && summaryResponses[currentPage]}
+                {@html summaryResponses[currentPage].summary.replace(/\n/g, '<br />')}
             {:else}
-                {summaryResponse || "Your summary will appear here..."}
+                Your summary will appear here...
             {/if}
         </div>
     </div>
+
 </div>
 
 
@@ -181,8 +331,11 @@
         <Drawer.Root>
             <div class="fixed bottom-[4.7rem] left-0 w-full flex justify-center">
                 <Drawer.Trigger>
-                    <Button variant="outline" class="w-100 h-7 flex items-center justify-center">
-                        <ChevronUp class="w-5 h-5" />{getTemperatureLabel(llmTemp)} ({llmTemp}) | {paragraphs} Paragraphs | {sentences} Sentences<ChevronUp class="w-5 h-5" />
+                    <Button variant="outline" class="max-w-150 h-7 flex items-center justify-center">
+                        <ChevronUp class="w-5 h-5" />{getTemperatureLabel(llmTemp)} ({llmTemp}) |
+                            {paragraphs === 0 ? "No Restrictions on Paragraphs" : paragraphs === 1 ? "1 Paragraph" : `${paragraphs} Paragraphs`} |
+                            {sentences === 0 ? "No Restrictions on Sentences" : sentences === 1 ? "1 Sentence" : `${sentences} Sentences`}
+                        <ChevronUp class="w-5 h-5" />
                     </Button>
                 </Drawer.Trigger>
             </div>
@@ -199,48 +352,47 @@
                                 <span class="text-sm font-bold text-orange-500">Chaotic</span>
                             </div>
                             <Input
-                                    type="range"
-                                    id="llm-temp"
-                                    min="0"
-                                    max="2"
-                                    step="0.01"
-                                    bind:value={llmTemp}
-                                    class="w-full mt-1"
-                                    style="accent-color: {getTempColor(llmTemp)};"
+                                type="range"
+                                id="llm-temp"
+                                min="0"
+                                max="2"
+                                step="0.01"
+                                bind:value={llmTemp}
+                                class="w-full mt-1"
+                                style="accent-color: {getTempColor(llmTemp)};"
                             />
                         </div>
 
 
                         <!-- Number Input Below the Slider -->
                         <Input
-                                type="number"
-                                id="llm-temp"
-                                bind:value={llmTemp}
-                                min="0"
-                                max="2"
-                                step="0.01"
-                                class="w-full border rounded-md px-2 py-1 text-center"
-                                onblur={validateTemp}
+                            type="number"
+                            id="llm-temp"
+                            bind:value={llmTemp}
+                            min="0"
+                            max="2"
+                            step="0.01"
+                            class="w-full border rounded-md px-2 py-1 text-center"
+                            onblur={validateTemp}
                         />
                     </div>
 
                     <!-- Paragraphs & Sentences Inputs -->
                     <div class="col-span-1 flex flex-col gap-2">
-                        <label for="paragraphs" class="text-sm font-medium">Paragraphs</label>
+                        <label for="paragraphs" class="text-sm font-medium">Paragraphs (0 for No Restriction)</label>
                         <Input
                             type="number"
                             id="paragraphs"
                             bind:value={paragraphs}
-                            min="1"
+                            min="0"
                             class="border rounded-md px-2 py-1"
                         />
-
-                        <label for="sentences" class="text-sm font-medium">Sentences per Paragraph</label>
+                        <label for="sentences" class="text-sm font-medium">Sentences per Paragraph (0 for No Restriction)</label>
                         <Input
                             type="number"
                             id="sentences"
                             bind:value={sentences}
-                            min="1"
+                            min="0"
                             class="border rounded-md px-2 py-1"
                         />
                     </div>
